@@ -1,0 +1,127 @@
+---
+title: 'SMC: spatial statistics'
+author: "Maria Süveges"
+date: "1/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Data
+
+The data set I will play with is the one produced in smc1.Rmd. 
+
+```{r, echo=TRUE, message=FALSE}
+library(dplyr)
+library(tidyr)
+library(STRbook)
+load(file = "results_smc1/smc_small.RObj")
+```
+
+I want to use distance from Earth instead of a temporal dimension; how the proper motion fields on the 2D slices corresponding to different parallax bins behave as we move across the galaxy? I need thus a reasonable binning, some compromise between meaningful widths and sufficient data.
+
+```{r, echo=TRUE}
+hist(smc_small$parallax)
+```
+
+Well, that's not going to be useful. Meaningful parallaxes cannot be negative, these are unphysical estimates resulting from the astrometric solution. Their only meaning is that they are very small. So, forget about this idea. I cannot do spatio-"temporal" modelling, only spatial. Instead, I will use "red" and "blue" as "temporal" dimension: blue are mostly young stars, red are mostly old ones.
+
+Define a "time" which will be zero for young objects and 1 for old objects:
+
+```{r, echo=TRUE}
+smc_small$age <- as.numeric(smc_small$redsample) 
+table(smc_small$age)
+
+```
+Nice, this is what it should be.
+
+
+### Visualisation
+
+```{r, echo=TRUE}
+library("gstat") 
+library("ggplot2")
+library("animation")
+
+#sum(apply(smc_small, 1, function(vec) any(is.na(vec))))
+```
+
+#### Map of the stars
+
+I use transparent colors to show the star density in crowded areas. The SMC lies on the sky meridian, so in order to not cut it in half by the plotting, I shift it by 180 degrees. Another option is a 2D density plot, but this version gives more detail. 
+```{r, echo=TRUE, warning=FALSE, out.width="100%", fig.height=4}
+#colnames(smc_small)
+
+smc_plot <- ggplot(smc_small) + 
+    geom_point(aes(x = (ra + 180) %% 360, y = dec), colour = rgb(0,0,0, alpha = 0.1), 
+        size = 0.4) + 
+    xlab("Right Ascension + 180 (deg)") + ylab("Declination (deg)") +
+    theme_bw() +
+    xlim(180, 210) + ylim(-77,-70) +
+    facet_grid(~redsample)
+
+print(smc_plot)
+```
+From the plots, it appears that the structure of the SMC as drawn by blue (young-ish) or red (old-ish) stars is different. Blue stars (left) are more concentrated, and seem to have some sub-structure (filaments and clusters). Red stars form rather an unstructured blob expanded over a larger spatial volume. This is plausible, as stars are formed usually in central, denser regions and in clusters which tend to slowly disperse over time.
+
+
+#### Average proper motions in spatial bins
+
+First, create a grid over which I will compute the averages. To do that, I need again to account for the fact that 0 = 360, so I introduce the coordinate ra18 = ra + 180 %% 360.
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+smc_small$ra180 <- (smc_small$ra + 180) %% 360
+lim_ra <- range(smc_small$ra180) 
+lim_dec <- range(smc_small$dec) 
+ra_axis <- seq(lim_ra[1], lim_ra[2], length=150) 
+dec_axis <- seq(lim_dec[1], lim_dec[2], length=150)
+ra_dec_grid <- expand.grid(ra = ra_axis, dec = dec_axis)
+```
+Second, allocate each star in smc_small to the bin whose center it is closest to. Then create a new dataframe with the means of the bins.
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+smc_grid <- smc_small
+dists_ra <- abs(outer(smc_small$ra180, ra_axis, "-"))
+dists_dec <- abs(outer(smc_small$dec, dec_axis, "-"))
+smc_grid$ra180_bin <- ra_axis[apply(dists_ra, 1, which.min)]
+smc_grid$dec_bin <- dec_axis[apply(dists_dec, 1, which.min)]
+red <- subset(smc_grid, redsample == 1)
+blue <- subset(smc_grid, bluesample == 1)
+
+smc_pm_binned <- group_by(smc_grid, ra180_bin, dec_bin, redsample) %>% 
+    summarise(pmra = median(pmra), pmdec = median(pmdec))
+
+red_pm_binned <- group_by(red, ra180_bin, dec_bin) %>% 
+    summarise(pmra = mean(pmra), pmdec = mean(pmdec))
+blue_pm_binned <- group_by(blue, ra180_bin, dec_bin) %>% 
+    summarise(pmra = median(pmra), pmdec = median(pmdec))
+
+# dim(red_pm_binned)
+#str(red_pm_binned)
+```
+Finally, plot it.
+```{r, echo=TRUE, warning=FALSE, out.width="100%", fig.height=4}
+
+smc_pm_plot <- ggplot(smc_pm_binned) + 
+    geom_point(data = red, aes(x = ra180, y = dec), 
+        colour = rgb(1,0,0, alpha = 0.1), size = 0.4) + 
+    geom_point(data = blue, aes(x = ra180, y = dec), 
+        colour = rgb(0,0,1, alpha = 0.1), size = 0.4) + 
+    geom_segment(aes(x = ra180_bin, xend = ra180_bin + pmra/10, y = dec_bin, 
+        yend = dec_bin + pmdec/10), arrow = arrow(length = unit(0.1, "cm")), size = 0.25) +
+    xlab("Right Ascension + 180 (deg)") + ylab("Declination (deg)") +
+    theme_bw() +
+    xlim(180, 210) + ylim(-77,-70) +
+    facet_grid(~redsample)
+
+print(smc_pm_plot)
+```
+
+Some comments:
+
+- The proper motions are in general smaller in the central region of the SMC than in the outskirts. The large values near the plot edges are due to the Galactic contamination:  stars there predominantly belong to the Galaxy, not to the SMC, so they seem to move faster due to their closeness.
+
+- The dense blobs (a big red and a smaller blue one) look like a cluster each (very similar proper motions) and potentially not belonging to the SMC (the proper motions are large).
+
+- All the SMC, both blue and red stars, seem to have a "downward", very homogeneous motion field. The direction is possibly due to the axis scales (declination range is 7 degrees, right ascension range is 30 degrees) and homogeneity may be due to my binning which is too rough to discern fine structure.
+
+- The area over which the proper motion field is homogeneous is larger for red stars (right) than for blue stars (left), confirming what the star density plot suggested.

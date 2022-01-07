@@ -1,0 +1,113 @@
+---
+title: "SMC: Data wrangling"
+author: "Maria Süveges"
+date: "1/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- ## R Markdown -->
+
+<!-- This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>. -->
+
+<!-- When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this: -->
+
+<!-- ```{r cars} -->
+<!-- summary(cars) -->
+<!-- ``` -->
+
+<!-- ## Including Plots -->
+
+<!-- You can also embed plots, for example: -->
+
+<!-- ```{r pressure, echo=FALSE} -->
+<!-- plot(pressure) -->
+<!-- ``` -->
+
+<!-- Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot. -->
+
+The data contains positions, proper motions, parallaxes, errors of parallaxes, and photometric magnitudes for a region of the southern sky that covers the Small Magellanic Cloud.
+
+To try out a bit some procedures that the Wikle et al. book is proposing, I divide it into two parts, a "blue" sample and a "red" sample.
+
+```{r, echo = TRUE}
+setwd("/Users/suveges/Documents/JobHunt/SNSF/R_preparation/Gaia_SMC/")
+data1 <- read.csv("data/smc2-result.csv")
+data1[1:10,]
+```
+Compute the BP - RP colour:
+```{r, echo = TRUE}
+data1$bp_rp <- data1$phot_bp_mean_mag - data1$phot_rp_mean_mag
+sum(is.na(data1$phot_rp_mean_mag) | is.na(data1$phot_bp_mean_mag))
+
+```
+There are some NAs in the data, so I remove all lines that contain any NA.
+
+```{r, echo = TRUE}
+d.tmp <- data1[apply(data1, MAR = 1, FUN = function(vec) !any(is.na(vec))), ]
+dim(d.tmp)
+dim(data1)
+data1 <- d.tmp
+```
+
+Divide the data into two halves along the line that delimits BL and red giants in the Luri paper, passing across the two points (2.6, 10) and (1,18.5) in the (G, BP--RP) plane:
+```{r, echo = TRUE}
+b1 <- (18.5-10) / (1-2.6)
+a1 <- 10 - 2.6*b1
+data1$dummy_g <- data1$bp_rp * b1 + a1
+```
+...and from the blue half, drop those that are fainter than the RR Lyraes
+at SMC distance:
+```{r, echo = TRUE}
+data1$bluesample <- (data1$phot_g_mean_mag < data1$dummy_g) & (data1$phot_g_mean_mag > 19)
+data1$redsample <- data1$phot_g_mean_mag > data1$dummy_g 
+
+red1 <- data1[data1$redsample, ]
+blue1 <- data1[data1$bluesample, ]
+#dim(red1)
+#dim(blue1)
+```
+Repeating the same for the second data set (the Gaia database is limited at 3 million objects in one go, so I needed to download the data in two parts), I get the whole SMC database. Joining the dataframes red and blue, I get the whole dataset for the SMC without NAs.
+
+```{r, echo = FALSE}
+data2 <- read.csv("data/smc1-result.csv")
+data2$bp_rp <- data2$phot_bp_mean_mag - data2$phot_rp_mean_mag
+data2 <- data2[apply(data2, MAR = 1, FUN = function(vec) !any(is.na(vec))), ]
+data2$dummy_g <- data2$bp_rp * b1 + a1
+data2$bluesample <- (data2$phot_g_mean_mag < data2$dummy_g) & (data2$phot_g_mean_mag > 19)
+data2$redsample <- data2$phot_g_mean_mag > data2$dummy_g 
+red2 <- data2[data2$redsample, ]
+blue2 <- data2[data2$bluesample, ]
+red <- rbind(red1, red2)
+blue <- rbind(blue1, blue2)
+```
+```{r, echo = TRUE}
+dim(red)
+dim(blue)
+```
+Finally, I need to downsample it to get a small enough sample to play with, and save them.
+
+```{r, echo = TRUE}
+set.seed(30)
+i.tmp <- sample(1:nrow(red), size = 25000, replace = FALSE)
+red0 <- red[i.tmp,]
+set.seed(35)
+i.tmp <- sample(1:nrow(blue), size = 11000, replace = FALSE)
+blue0 <- blue[i.tmp,]
+smc_small <- rbind(red0, blue0)
+save(smc_small, file = "results_smc1/smc_small.RObj")
+
+#dim(smc_small)
+```
+Continuation in smc2.Rmd.
+
+
+
+
+
+
+
+
